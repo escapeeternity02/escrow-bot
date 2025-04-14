@@ -1,91 +1,90 @@
-import logging
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-import os
+# (Everything above stays the same...)
 
-# Configure logging
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-
-# Retrieve the bot token from environment variables
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-
-# Dictionary to store fee rates per group
-fee_rates = {}
-
-# Function to calculate fee and total amount
-def calculate_fee(amount: float, rate: float):
-    fee = round(amount * rate / 100, 2)
-    total = round(amount + fee, 2)
-    return fee, total
-
-# Function to send fee details to user's private chat
-async def send_fee_details_to_user(context: ContextTypes.DEFAULT_TYPE, user_id: int, message: str):
+@dp.message(Command("fee"))
+async def fee_cmd(message: Message):
     try:
-        await context.bot.send_message(chat_id=user_id, text=message)
-    except Exception as e:
-        logging.warning(f"Unable to send private message to user {user_id}: {e}")
+        amount = float(message.text.split()[1])
+        rate = float(message.text.split()[2]) if len(message.text.split()) > 2 else None
+        group_id = message.chat.id
+        general, _, _ = await get_fee_rate(group_id)
+        fee_rate = rate if rate else general
+        fee = (fee_rate / 100) * amount
+        total = amount + fee
 
-# Handler for /fee command
-async def fee_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        await update.message.reply_text("Usage: /fee <amount> [rate]")
-        return
+        result = (
+            f"Amount: {amount:.2f}\n"
+            f"Fee Rate: {fee_rate}%\n"
+            f"Fee: {fee:.2f}\n"
+            f"Total: {total:.2f}"
+        )
 
+        await message.reply(result)
+
+        # Send DM to user
+        try:
+            await bot.send_message(message.from_user.id, result)
+        except Exception as e:
+            logging.warning(f"Failed to DM user {message.from_user.id}: {e}")
+
+    except:
+        await message.reply("Usage: /fee <amount> [rate]")
+
+@dp.message(Command("feeinr"))
+async def fee_inr(message: Message):
     try:
-        amount = float(context.args[0])
-        if len(context.args) > 1:
-            rate = float(context.args[1])
-        else:
-            # Use stored rate or default to 4%
-            rate = fee_rates.get(update.effective_chat.id, 4.0)
+        amount = float(message.text.split()[1])
+        rate = float(message.text.split()[2]) if len(message.text.split()) > 2 else None
+        group_id = message.chat.id
+        _, inr, _ = await get_fee_rate(group_id)
+        fee_rate = rate if rate else inr
+        fee = (fee_rate / 100) * amount
+        total = amount + fee
 
-        fee, total = calculate_fee(amount, rate)
-        message = (
+        result = (
             f"Amount: {amount:.2f} ₹\n"
-            f"Fee Rate: {rate:.1f}%\n"
+            f"Fee Rate: {fee_rate}%\n"
             f"Fee: {fee:.2f} ₹\n"
             f"Total: {total:.2f} ₹"
         )
 
-        # Send message in group chat
-        await update.message.reply_text(message)
+        await message.reply(result)
 
-        # Send the same message to user's private chat
-        user_id = update.effective_user.id
-        await send_fee_details_to_user(context, user_id, message)
+        # Send DM to user
+        try:
+            await bot.send_message(message.from_user.id, result)
+        except Exception as e:
+            logging.warning(f"Failed to DM user {message.from_user.id}: {e}")
 
-    except ValueError:
-        await update.message.reply_text("Please provide a valid amount and optional rate.")
+    except:
+        await message.reply("Usage: /feeinr <amount> [rate]")
 
-# Handler for /setfee command
-async def setfee_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        await update.message.reply_text("Usage: /setfee <rate>")
-        return
-
+@dp.message(Command("feeusdt"))
+async def fee_usdt(message: Message):
     try:
-        rate = float(context.args[0])
-        fee_rates[update.effective_chat.id] = rate
-        await update.message.reply_text(f"Fee rate set to {rate:.1f}% for this group.")
-    except ValueError:
-        await update.message.reply_text("Please provide a valid rate.")
+        amount = float(message.text.split()[1])
+        rate = float(message.text.split()[2]) if len(message.text.split()) > 2 else None
+        group_id = message.chat.id
+        _, _, usdt = await get_fee_rate(group_id)
+        fee_rate = rate if rate else usdt
+        fee = (fee_rate / 100) * amount
+        total = amount + fee
 
-# Handler for /start command in private chat
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Hello! I'm your Escrow Bot. You can use /fee command in group chats to calculate fees, and I'll send you the details here as well.")
+        result = (
+            f"Amount: {amount:.2f} $\n"
+            f"Fee Rate: {fee_rate}%\n"
+            f"Fee: {fee:.2f} $\n"
+            f"Total: {total:.2f} $"
+        )
 
-# Main function to start the bot
-def main():
-    application = ApplicationBuilder().token(BOT_TOKEN).build()
+        await message.reply(result)
 
-    application.add_handler(CommandHandler("fee", fee_command))
-    application.add_handler(CommandHandler("setfee", setfee_command))
-    application.add_handler(CommandHandler("start", start_command))
+        # Send DM to user
+        try:
+            await bot.send_message(message.from_user.id, result)
+        except Exception as e:
+            logging.warning(f"Failed to DM user {message.from_user.id}: {e}")
 
-    application.run_polling()
+    except:
+        await message.reply("Usage: /feeusdt <amount> [rate]")
 
-if __name__ == "__main__":
-    main()
+# (Everything below stays the same...)
