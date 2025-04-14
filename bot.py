@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from aiogram import Bot, Dispatcher, F
+from aiogram import Bot, Dispatcher, types
 from aiogram.types import Message, ChatMemberUpdated
 from aiogram.filters import Command
 import aiosqlite
@@ -69,7 +69,15 @@ async def fee_cmd(message: Message):
         general, _, _ = await get_fee_rate(group_id)
         fee_rate = rate if rate else general
         fee = (fee_rate / 100) * amount
-        await message.reply(f"Escrow Fee: {fee:.2f}")
+        total = amount + fee
+
+        # Format and show results
+        await message.reply(
+            f"Amount: {amount:.2f}\n"
+            f"Fee Rate: {fee_rate}%\n"
+            f"Fee: {fee:.2f}\n"
+            f"Total: {total:.2f}"
+        )
     except:
         await message.reply("Usage: /fee <amount> [rate]")
 
@@ -82,7 +90,15 @@ async def fee_inr(message: Message):
         _, inr, _ = await get_fee_rate(group_id)
         fee_rate = rate if rate else inr
         fee = (fee_rate / 100) * amount
-        await message.reply(f"Escrow Fee (₹): ₹{fee:.2f}")
+        total = amount + fee
+
+        # Format and show results
+        await message.reply(
+            f"Amount: {amount:.2f} ₹\n"
+            f"Fee Rate: {fee_rate}%\n"
+            f"Fee: {fee:.2f} ₹\n"
+            f"Total: {total:.2f} ₹"
+        )
     except:
         await message.reply("Usage: /feeinr <amount> [rate]")
 
@@ -95,7 +111,15 @@ async def fee_usdt(message: Message):
         _, _, usdt = await get_fee_rate(group_id)
         fee_rate = rate if rate else usdt
         fee = (fee_rate / 100) * amount
-        await message.reply(f"Escrow Fee ($): ${fee:.2f}")
+        total = amount + fee
+
+        # Format and show results
+        await message.reply(
+            f"Amount: {amount:.2f} $\n"
+            f"Fee Rate: {fee_rate}%\n"
+            f"Fee: {fee:.2f} $\n"
+            f"Total: {total:.2f} $"
+        )
     except:
         await message.reply("Usage: /feeusdt <amount> [rate]")
 
