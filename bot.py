@@ -1,170 +1,91 @@
-import asyncio
 import logging
-from aiogram import Bot, Dispatcher, types
-from aiogram.types import Message, ChatMemberUpdated
-from aiogram.filters import Command
-import aiosqlite
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 import os
 
-API_TOKEN = os.getenv("BOT_TOKEN")
-DATABASE = "data.db"
+# Configure logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 
-bot = Bot(token=API_TOKEN)
-dp = Dispatcher()
+# Retrieve the bot token from environment variables
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
-# Setup DB
-async def init_db():
-    async with aiosqlite.connect(DATABASE) as db:
-        await db.execute('''
-            CREATE TABLE IF NOT EXISTS fee_rates (
-                group_id INTEGER PRIMARY KEY,
-                general REAL DEFAULT 1.0,
-                inr REAL DEFAULT 1.0,
-                usdt REAL DEFAULT 1.0
-            )
-        ''')
-        await db.commit()
+# Dictionary to store fee rates per group
+fee_rates = {}
 
-async def set_fee_rate(group_id: int, general=None, inr=None, usdt=None):
-    async with aiosqlite.connect(DATABASE) as db:
-        await db.execute('''
-            INSERT INTO fee_rates (group_id, general, inr, usdt)
-            VALUES (?, COALESCE(?, 1.0), COALESCE(?, 1.0), COALESCE(?, 1.0))
-            ON CONFLICT(group_id) DO UPDATE SET
-                general = COALESCE(?, general),
-                inr = COALESCE(?, inr),
-                usdt = COALESCE(?, usdt)
-        ''', (group_id, general, inr, usdt, general, inr, usdt))
-        await db.commit()
+# Function to calculate fee and total amount
+def calculate_fee(amount: float, rate: float):
+    fee = round(amount * rate / 100, 2)
+    total = round(amount + fee, 2)
+    return fee, total
 
-async def get_fee_rate(group_id: int):
-    async with aiosqlite.connect(DATABASE) as db:
-        async with db.execute("SELECT general, inr, usdt FROM fee_rates WHERE group_id = ?", (group_id,)) as cursor:
-            row = await cursor.fetchone()
-            return row if row else (1.0, 1.0, 1.0)
-
-@dp.message(Command("start"))
-async def start(message: Message):
-    await message.answer("Hello! I'm your simple escrow bot. Use /help to see available commands.")
-
-@dp.message(Command("help"))
-async def help_cmd(message: Message):
-    await message.answer(
-        "Available Commands:\n"
-        "/fee <amount> [rate] - Calculate escrow fee (general)\n"
-        "/feeinr <amount> [rate] - Calculate escrow fee in INR (₹)\n"
-        "/feeusdt <amount> [rate] - Calculate escrow fee in USDT ($)\n"
-        "/setfee <rate> - Set general fee rate\n"
-        "/setfeeinr <rate> - Set INR fee rate\n"
-        "/setfeeusdt <rate> - Set USDT fee rate\n"
-        "/help - Show this message"
-    )
-
-@dp.message(Command("fee"))
-async def fee_cmd(message: Message):
+# Function to send fee details to user's private chat
+async def send_fee_details_to_user(context: ContextTypes.DEFAULT_TYPE, user_id: int, message: str):
     try:
-        amount = float(message.text.split()[1])
-        rate = float(message.text.split()[2]) if len(message.text.split()) > 2 else None
-        group_id = message.chat.id
-        general, _, _ = await get_fee_rate(group_id)
-        fee_rate = rate if rate else general
-        fee = (fee_rate / 100) * amount
-        total = amount + fee
+        await context.bot.send_message(chat_id=user_id, text=message)
+    except Exception as e:
+        logging.warning(f"Unable to send private message to user {user_id}: {e}")
 
-        # Format and show results
-        await message.reply(
-            f"Amount: {amount:.2f}\n"
-            f"Fee Rate: {fee_rate}%\n"
-            f"Fee: {fee:.2f}\n"
-            f"Total: {total:.2f}"
-        )
-    except:
-        await message.reply("Usage: /fee <amount> [rate]")
+# Handler for /fee command
+async def fee_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Usage: /fee <amount> [rate]")
+        return
 
-@dp.message(Command("feeinr"))
-async def fee_inr(message: Message):
     try:
-        amount = float(message.text.split()[1])
-        rate = float(message.text.split()[2]) if len(message.text.split()) > 2 else None
-        group_id = message.chat.id
-        _, inr, _ = await get_fee_rate(group_id)
-        fee_rate = rate if rate else inr
-        fee = (fee_rate / 100) * amount
-        total = amount + fee
+        amount = float(context.args[0])
+        if len(context.args) > 1:
+            rate = float(context.args[1])
+        else:
+            # Use stored rate or default to 4%
+            rate = fee_rates.get(update.effective_chat.id, 4.0)
 
-        # Format and show results
-        await message.reply(
+        fee, total = calculate_fee(amount, rate)
+        message = (
             f"Amount: {amount:.2f} ₹\n"
-            f"Fee Rate: {fee_rate}%\n"
+            f"Fee Rate: {rate:.1f}%\n"
             f"Fee: {fee:.2f} ₹\n"
             f"Total: {total:.2f} ₹"
         )
-    except:
-        await message.reply("Usage: /feeinr <amount> [rate]")
 
-@dp.message(Command("feeusdt"))
-async def fee_usdt(message: Message):
+        # Send message in group chat
+        await update.message.reply_text(message)
+
+        # Send the same message to user's private chat
+        user_id = update.effective_user.id
+        await send_fee_details_to_user(context, user_id, message)
+
+    except ValueError:
+        await update.message.reply_text("Please provide a valid amount and optional rate.")
+
+# Handler for /setfee command
+async def setfee_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Usage: /setfee <rate>")
+        return
+
     try:
-        amount = float(message.text.split()[1])
-        rate = float(message.text.split()[2]) if len(message.text.split()) > 2 else None
-        group_id = message.chat.id
-        _, _, usdt = await get_fee_rate(group_id)
-        fee_rate = rate if rate else usdt
-        fee = (fee_rate / 100) * amount
-        total = amount + fee
+        rate = float(context.args[0])
+        fee_rates[update.effective_chat.id] = rate
+        await update.message.reply_text(f"Fee rate set to {rate:.1f}% for this group.")
+    except ValueError:
+        await update.message.reply_text("Please provide a valid rate.")
 
-        # Format and show results
-        await message.reply(
-            f"Amount: {amount:.2f} $\n"
-            f"Fee Rate: {fee_rate}%\n"
-            f"Fee: {fee:.2f} $\n"
-            f"Total: {total:.2f} $"
-        )
-    except:
-        await message.reply("Usage: /feeusdt <amount> [rate]")
+# Handler for /start command in private chat
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Hello! I'm your Escrow Bot. You can use /fee command in group chats to calculate fees, and I'll send you the details here as well.")
 
-@dp.message(Command("setfee"))
-async def set_fee(message: Message):
-    try:
-        rate = float(message.text.split()[1])
-        await set_fee_rate(message.chat.id, general=rate)
-        await message.reply(f"General fee rate set to {rate}%")
-    except:
-        await message.reply("Usage: /setfee <rate>")
+# Main function to start the bot
+def main():
+    application = ApplicationBuilder().token(BOT_TOKEN).build()
 
-@dp.message(Command("setfeeinr"))
-async def set_fee_inr(message: Message):
-    try:
-        rate = float(message.text.split()[1])
-        await set_fee_rate(message.chat.id, inr=rate)
-        await message.reply(f"INR fee rate set to {rate}%")
-    except:
-        await message.reply("Usage: /setfeeinr <rate>")
+    application.add_handler(CommandHandler("fee", fee_command))
+    application.add_handler(CommandHandler("setfee", setfee_command))
+    application.add_handler(CommandHandler("start", start_command))
 
-@dp.message(Command("setfeeusdt"))
-async def set_fee_usdt(message: Message):
-    try:
-        rate = float(message.text.split()[1])
-        await set_fee_rate(message.chat.id, usdt=rate)
-        await message.reply(f"USDT fee rate set to {rate}%")
-    except:
-        await message.reply("Usage: /setfeeusdt <rate>")
-
-@dp.my_chat_member()
-async def on_new_chat_member(event: ChatMemberUpdated):
-    if event.new_chat_member.status == "member":
-        await set_fee_rate(event.chat.id)
-        await bot.send_message(
-            event.chat.id,
-            "👋 Hello! I'm your escrow bot.\n"
-            "Set your fee rates with /setfee, /setfeeinr, or /setfeeusdt.\n"
-            "Use /help to see all commands!"
-        )
-
-async def main():
-    await init_db()
-    await dp.start_polling(bot)
+    application.run_polling()
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    asyncio.run(main())
+    main()
